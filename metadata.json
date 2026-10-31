@@ -1,0 +1,6 @@
+{
+  "name": "Serpent Vanguard: Rogue Defense",
+  "description": "結合經典貪食蛇身軀組裝與肉鴿塔防倖存者割草的動作防衛遊戲。操控機械巨蛇穿梭戰場，吞噬能量核心成長身軀，各節武裝砲台自動防衛，迎戰蟲潮與泰坦巨獸！",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
