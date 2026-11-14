@@ -8,6 +8,7 @@ import { Shield, Zap, Flame, Disc, Bomb, Droplets, Crosshair, Radio, Activity, S
 import { GameEngine } from '../game/GameEngine';
 import { TurretType } from '../types/game';
 import { TURRET_CATALOG } from '../game/constants';
+import { Minimap } from './Minimap';
 
 interface HUDProps {
   engine: GameEngine | null;
@@ -187,6 +188,9 @@ export const HUD: React.FC<HUDProps> = ({ engine, onDash }) => {
               {dashReady ? '[空白鍵]' : `${engine.dashCooldown.toFixed(1)}s`}
             </span>
           </button>
+
+          {/* Tactical Radar Minimap */}
+          <Minimap engine={engine} />
         </div>
       </div>
 
