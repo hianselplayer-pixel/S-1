@@ -119,7 +119,7 @@ export const HUD: React.FC<HUDProps> = ({ engine, onDash }) => {
               蛇身節數: {engine.segments.length + 1} 節
             </span>
             <span className="text-slate-300 font-bold tabular-nums">
-              半徑 {Math.round(engine.getMaxReach())}m · 阻擋彈幕
+              自由巡航 · 衝刺吞噬秒殺
             </span>
           </div>
         </div>

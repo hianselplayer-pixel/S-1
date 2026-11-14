@@ -884,22 +884,7 @@ export class GameEngine {
     this.snakeX += Math.cos(this.snakeAngle) * currentSpeed * dt;
     this.snakeY += Math.sin(this.snakeAngle) * currentSpeed * dt;
 
-    // Core-tethered distance constraints:
-    // Tail is anchored to Prometheus Core; head cannot exceed total reach or crash inside core
-    const minReach = this.getMinReach();
-    const maxReach = this.getMaxReach();
-    const coreDx = this.snakeX - this.reactorX;
-    const coreDy = this.snakeY - this.reactorY;
-    const coreDist = Math.hypot(coreDx, coreDy);
-
-    if (coreDist > maxReach) {
-      this.snakeX = this.reactorX + (coreDx / coreDist) * maxReach;
-      this.snakeY = this.reactorY + (coreDy / coreDist) * maxReach;
-    } else if (coreDist < minReach && coreDist > 0.001) {
-      this.snakeX = this.reactorX + (coreDx / coreDist) * minReach;
-      this.snakeY = this.reactorY + (coreDy / coreDist) * minReach;
-    }
-
+    // 蛇已正常解綁核心，可在整片圓形戰場自由遊走！
     // Circular Arena Boundary Clamp (邊界為圓形)
     const arenaDist = Math.hypot(this.snakeX - this.reactorX, this.snakeY - this.reactorY);
     if (arenaDist > ARENA_RADIUS - SNAKE_HEAD_RADIUS) {
@@ -912,10 +897,9 @@ export class GameEngine {
   private updateSnakeBody(dt: number) {
     if (this.segments.length === 0) return;
 
-    const anchor = this.getCoreAnchorPoint();
     const N = this.segments.length;
 
-    // Pass 1: Forward following from head to tail
+    // 自由貪吃蛇身軀追隨系統：每節依序自然跟隨前一節，不再被核心束縛
     let leaderX = this.snakeX;
     let leaderY = this.snakeY;
 
@@ -930,59 +914,8 @@ export class GameEngine {
         seg.angle = angle;
         seg.x = leaderX - Math.cos(angle) * SEGMENT_DISTANCE;
         seg.y = leaderY - Math.sin(angle) * SEGMENT_DISTANCE;
-      }
-
-      leaderX = seg.x;
-      leaderY = seg.y;
-    }
-
-    // Pass 2: Anchor tail segment directly to reactor core perimeter socket
-    const tail = this.segments[N - 1];
-    const tailAnchorDist = Math.hypot(tail.x - anchor.x, tail.y - anchor.y);
-    if (tailAnchorDist > SEGMENT_DISTANCE) {
-      const ang = Math.atan2(tail.y - anchor.y, tail.x - anchor.x);
-      tail.x = anchor.x + Math.cos(ang) * SEGMENT_DISTANCE;
-      tail.y = anchor.y + Math.sin(ang) * SEGMENT_DISTANCE;
-    }
-
-    // Pass 3: Backward relaxation from tail up to head to avoid overstretching
-    for (let i = N - 2; i >= 0; i--) {
-      const curr = this.segments[i];
-      const next = this.segments[i + 1];
-      const dx = curr.x - next.x;
-      const dy = curr.y - next.y;
-      const dist = Math.hypot(dx, dy);
-
-      if (dist > SEGMENT_DISTANCE) {
-        const ang = Math.atan2(dy, dx);
-        curr.x = next.x + Math.cos(ang) * SEGMENT_DISTANCE;
-        curr.y = next.y + Math.sin(ang) * SEGMENT_DISTANCE;
-      }
-
-      // Prevent any segment from collapsing into reactor core interior
-      const rDist = Math.hypot(curr.x - this.reactorX, curr.y - this.reactorY);
-      if (rDist < REACTOR_RADIUS + SNAKE_BODY_RADIUS + 4) {
-        const rAng = Math.atan2(curr.y - this.reactorY, curr.x - this.reactorX);
-        curr.x = this.reactorX + Math.cos(rAng) * (REACTOR_RADIUS + SNAKE_BODY_RADIUS + 4);
-        curr.y = this.reactorY + Math.sin(rAng) * (REACTOR_RADIUS + SNAKE_BODY_RADIUS + 4);
-      }
-    }
-
-    // Pass 4: Final forward alignment and angle recalculation
-    leaderX = this.snakeX;
-    leaderY = this.snakeY;
-    for (let i = 0; i < N; i++) {
-      const seg = this.segments[i];
-      const dx = leaderX - seg.x;
-      const dy = leaderY - seg.y;
-      const dist = Math.hypot(dx, dy);
-
-      if (dist > 0.001) {
+      } else if (dist > 0.001) {
         seg.angle = Math.atan2(dy, dx);
-        if (dist > SEGMENT_DISTANCE) {
-          seg.x = leaderX - Math.cos(seg.angle) * SEGMENT_DISTANCE;
-          seg.y = leaderY - Math.sin(seg.angle) * SEGMENT_DISTANCE;
-        }
       }
 
       // Drop venom puddles if equipped
@@ -1966,9 +1899,36 @@ export class GameEngine {
         enemy.y += Math.sin(inwardAngle) * currentSpeed * dt;
       }
 
-      // Ramming check with Snake Head
+      // Ramming & Devouring check with Snake Head (衝刺張嘴秒殺吞噬)
       const headDist = Math.hypot(this.snakeX - enemy.x, this.snakeY - enemy.y);
-      if (headDist < SNAKE_HEAD_RADIUS + enemy.radius) {
+      const eatRange = SNAKE_HEAD_RADIUS + enemy.radius + (this.isDashing ? 22 : 0);
+
+      if (headDist < eatRange) {
+        // 當衝刺時，蛇可以張開嘴吃下非 boss 的敵人 (秒殺)
+        if (this.isDashing && !enemy.isBoss) {
+          sound.playExplosion();
+          this.addDamageNumber(enemy.x, enemy.y - 12, '吞噬秒殺 DEVOUR!', '#f43f5e');
+
+          // 吞噬粒子
+          for (let p = 0; p < 18; p++) {
+            const pa = Math.random() * Math.PI * 2;
+            const ps = 80 + Math.random() * 200;
+            this.addParticle(
+              enemy.x,
+              enemy.y,
+              Math.cos(pa) * ps,
+              Math.sin(pa) * ps,
+              '#f43f5e',
+              0.35,
+              5,
+              'triangle'
+            );
+          }
+
+          this.killEnemy(enemy, i);
+          continue;
+        }
+
         const ramDmg = this.ramDamage * (this.isDashing ? 3.0 : 1.0) * this.globalDamageMult;
         this.applyDamageToEnemy(enemy, ramDmg, 'Head Kinetic Ram');
         sound.playHitSound();
@@ -2094,17 +2054,33 @@ export class GameEngine {
   }
 
   private checkLevelProgression() {
-    const totalEnemies = 2000;
-    const killPercent = (this.stats.kills / totalEnemies) * 100;
-
-    const thresholds = [
-      0, 0.05, 0.10, 1.0, 3.0, 8.0, 15.0, 22.0, 30.0, 38.0, 46.0,
-      54.0, 62.0, 70.0, 76.0, 82.0, 88.0, 93.0, 96.0, 99.0, 100.0
+    // 平滑階梯式擊殺門檻：初期需要 5~8 隻擊殺 (避免一開始 1 隻就升級太快)，中後期穩定遞增 (避免後面怪物卡住升不上)
+    const cumulativeKills = [
+      0,   // Lv.1
+      5,   // Lv.2 (+5)
+      12,  // Lv.3 (+7)
+      21,  // Lv.4 (+9)
+      32,  // Lv.5 (+11)
+      45,  // Lv.6 (+13)
+      60,  // Lv.7 (+15)
+      78,  // Lv.8 (+18)
+      98,  // Lv.9 (+20)
+      121, // Lv.10 (+23)
+      147, // Lv.11 (+26)
+      176, // Lv.12 (+29)
+      208, // Lv.13 (+32)
+      243, // Lv.14 (+35)
+      281, // Lv.15 (+38)
+      322, // Lv.16 (+41)
+      366, // Lv.17 (+44)
+      413, // Lv.18 (+47)
+      463, // Lv.19 (+50)
+      520, // Lv.20 (+57)
     ];
 
     let targetLevel = 1;
     for (let lvl = 20; lvl >= 1; lvl--) {
-      if (killPercent >= thresholds[lvl]) {
+      if (this.stats.kills >= cumulativeKills[lvl - 1]) {
         targetLevel = lvl;
         break;
       }
@@ -2112,11 +2088,11 @@ export class GameEngine {
 
     const curLvl = Math.min(20, Math.max(1, this.level));
     const nextLvl = Math.min(20, curLvl + 1);
-    const curThresh = thresholds[curLvl];
-    const nextThresh = thresholds[nextLvl];
+    const curReq = cumulativeKills[curLvl - 1] || 0;
+    const nextReq = cumulativeKills[curLvl] || (curReq + 50);
 
-    this.maxExp = Math.max(1, Math.round((nextThresh - curThresh) * 100));
-    this.exp = Math.max(0, Math.min(this.maxExp, Math.round((killPercent - curThresh) * 100)));
+    this.maxExp = Math.max(1, nextReq - curReq);
+    this.exp = Math.max(0, Math.min(this.maxExp, this.stats.kills - curReq));
 
     if (targetLevel > this.level && this.level < 20) {
       this.level = targetLevel;
@@ -2256,15 +2232,9 @@ export class GameEngine {
       );
     }
 
-    // Increased EXP drop
-    this.items.push({
-      id: Math.random().toString(),
-      x: enemy.x,
-      y: enemy.y,
-      type: 'exp',
-      value: enemy.expValue,
-      radius: 9,
-    });
+    // 依指示：刪除經驗球，擊殺時直接獲取雙倍經驗！
+    const expGained = (enemy.expValue || 30) * 2;
+    this.addExp(expGained);
 
     if (enemy.scrapValue > 0) {
       this.items.push({
@@ -3019,13 +2989,11 @@ export class GameEngine {
 
   private drawSnake(ctx: CanvasRenderingContext2D) {
     const time = performance.now() / 1000;
-    const anchor = this.getCoreAnchorPoint();
 
-    // 1. Build ordered chain of nodes: [Head, Segment 0, ..., Segment N-1, Anchor]
+    // 1. Build ordered chain of nodes: [Head, Segment 0, ..., Segment N-1] (自由遊走，無錨點束縛)
     const chainPoints: { x: number; y: number }[] = [
       { x: this.snakeX, y: this.snakeY },
       ...this.segments.map((s) => ({ x: s.x, y: s.y })),
-      { x: anchor.x, y: anchor.y },
     ];
 
     const M = chainPoints.length;
@@ -3250,121 +3218,163 @@ export class GameEngine {
       ctx.restore();
     }
 
-    // --- NEON LAYER 7: Anchor Mooring Clamps at Core ---
-    ctx.save();
-    ctx.translate(anchor.x, anchor.y);
-    ctx.rotate(anchor.angle);
-
-    ctx.shadowColor = '#00f0ff';
-    ctx.shadowBlur = 12;
-    ctx.strokeStyle = '#00f0ff';
-    ctx.lineWidth = 2.5;
-
-    // Dual hydraulic clamping claws gripping reactor rim
-    ctx.beginPath();
-    ctx.moveTo(-10, -12);
-    ctx.lineTo(4, -10);
-    ctx.lineTo(8, 0);
-    ctx.lineTo(4, 10);
-    ctx.lineTo(-10, 12);
-    ctx.stroke();
-
-    // Central umbilical energy swivel core
-    ctx.fillStyle = '#38bdf8';
-    ctx.beginPath();
-    ctx.arc(0, 0, 5, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-
     // --- NEON LAYER 8: Snake Head (Neon Cyber Dreadnought Dragon Warhead) ---
     ctx.save();
     ctx.translate(this.snakeX, this.snakeY);
     ctx.rotate(this.snakeAngle);
 
-    // Head wireframe outer bloom
-    ctx.shadowColor = this.isDashing ? '#38bdf8' : '#00f0ff';
-    ctx.shadowBlur = 16;
-    ctx.strokeStyle = '#00f0ff';
-    ctx.lineWidth = 2.8;
+    if (this.isDashing) {
+      // 衝刺狀態：機械血盆大口完全張開！展開機械獠牙與狂暴吞噬漩渦
+      ctx.shadowColor = '#f43f5e';
+      ctx.shadowBlur = 24;
 
-    // Angular dragon/warhead prow geometry
-    ctx.beginPath();
-    ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0); // Extended prow beak
-    ctx.lineTo(SNAKE_HEAD_RADIUS - 4, -SNAKE_HEAD_RADIUS - 2);
-    ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, -SNAKE_HEAD_RADIUS + 4);
-    ctx.lineTo(-SNAKE_HEAD_RADIUS - 2, 0);
-    ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, SNAKE_HEAD_RADIUS - 4);
-    ctx.lineTo(SNAKE_HEAD_RADIUS - 4, SNAKE_HEAD_RADIUS + 2);
-    ctx.closePath();
-    ctx.stroke();
+      // 吞噬黑洞引力漩渦核心 (Devouring Singularity Vortex)
+      const vortexGrad = ctx.createRadialGradient(8, 0, 2, 8, 0, 20);
+      vortexGrad.addColorStop(0, '#ffffff');
+      vortexGrad.addColorStop(0.35, '#f43f5e');
+      vortexGrad.addColorStop(0.85, '#881337');
+      vortexGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = vortexGrad;
+      ctx.beginPath();
+      ctx.arc(8, 0, 20, 0, Math.PI * 2);
+      ctx.fill();
 
-    // Inner faceted wireframe armor lines
-    ctx.strokeStyle = '#38bdf8aa';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0);
-    ctx.lineTo(2, -8);
-    ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, -SNAKE_HEAD_RADIUS + 4);
+      // 上顎 (Upper Jaw - 張開朝上)
+      ctx.strokeStyle = '#f43f5e';
+      ctx.lineWidth = 3.2;
+      ctx.beginPath();
+      ctx.moveTo(SNAKE_HEAD_RADIUS + 22, -14); // 上大獠牙尖端
+      ctx.lineTo(SNAKE_HEAD_RADIUS + 4, -6);
+      ctx.lineTo(2, -SNAKE_HEAD_RADIUS - 4);
+      ctx.lineTo(-SNAKE_HEAD_RADIUS + 6, -SNAKE_HEAD_RADIUS);
+      ctx.lineTo(-SNAKE_HEAD_RADIUS - 2, 0);
+      ctx.stroke();
 
-    ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0);
-    ctx.lineTo(2, 8);
-    ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, SNAKE_HEAD_RADIUS - 4);
+      // 下顎 (Lower Jaw - 張開朝下)
+      ctx.beginPath();
+      ctx.moveTo(SNAKE_HEAD_RADIUS + 22, 14); // 下大獠牙尖端
+      ctx.lineTo(SNAKE_HEAD_RADIUS + 4, 6);
+      ctx.lineTo(2, SNAKE_HEAD_RADIUS + 4);
+      ctx.lineTo(-SNAKE_HEAD_RADIUS + 6, SNAKE_HEAD_RADIUS);
+      ctx.lineTo(-SNAKE_HEAD_RADIUS - 2, 0);
+      ctx.stroke();
 
-    ctx.moveTo(2, -8);
-    ctx.lineTo(-SNAKE_HEAD_RADIUS - 2, 0);
-    ctx.lineTo(2, 8);
-    ctx.stroke();
+      // 機械獠牙齒列 (Razor Cyber Fangs)
+      ctx.fillStyle = '#ffffff';
+      // 上排獠牙
+      for (let f = 0; f < 3; f++) {
+        const fx = 8 + f * 5;
+        const fy = -10 + f * 1.5;
+        ctx.beginPath();
+        ctx.moveTo(fx, fy);
+        ctx.lineTo(fx + 2.5, fy - 6);
+        ctx.lineTo(fx + 5, fy);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // 下排獠牙
+      for (let f = 0; f < 3; f++) {
+        const fx = 8 + f * 5;
+        const fy = 10 - f * 1.5;
+        ctx.beginPath();
+        ctx.moveTo(fx, fy);
+        ctx.lineTo(fx + 2.5, fy + 6);
+        ctx.lineTo(fx + 5, fy);
+        ctx.closePath();
+        ctx.fill();
+      }
 
-    // Twin Heavy Forward Railgun Cannons (Head Arsenal)
-    ctx.strokeStyle = '#00f0ff';
-    ctx.lineWidth = 2.2;
-    // Left Railgun
-    ctx.beginPath();
-    ctx.moveTo(6, -12);
-    ctx.lineTo(28, -12);
-    ctx.moveTo(12, -15);
-    ctx.lineTo(12, -9);
-    ctx.moveTo(20, -15);
-    ctx.lineTo(20, -9);
-    // Right Railgun
-    ctx.moveTo(6, 12);
-    ctx.lineTo(28, 12);
-    ctx.moveTo(12, 9);
-    ctx.lineTo(12, 15);
-    ctx.moveTo(20, 9);
-    ctx.lineTo(20, 15);
-    ctx.stroke();
+      // 狂暴霓虹眼 (Furious Crimson Eyes)
+      ctx.fillStyle = '#f43f5e';
+      ctx.shadowColor = '#f43f5e';
+      ctx.shadowBlur = 14;
+      ctx.fillRect(8, -14, 8, 3.5);
+      ctx.fillRect(8, 11, 8, 3.5);
+    } else {
+      // 正常閉合狀態：流線裝甲戰艦龍頭
+      ctx.shadowColor = '#00f0ff';
+      ctx.shadowBlur = 16;
+      ctx.strokeStyle = '#00f0ff';
+      ctx.lineWidth = 2.8;
 
-    // Center Heavy Plasma Mortar Chamber (Pulsing Diamond)
-    const plasmaPulse = (Math.sin(time * 8) + 1) * 2;
-    ctx.strokeStyle = '#a855f7';
-    ctx.lineWidth = 2.0;
-    ctx.beginPath();
-    ctx.moveTo(16 + plasmaPulse, 0);
-    ctx.lineTo(8, -5);
-    ctx.lineTo(0, 0);
-    ctx.lineTo(8, 5);
-    ctx.closePath();
-    ctx.stroke();
+      // Angular dragon/warhead prow geometry
+      ctx.beginPath();
+      ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0); // Extended prow beak
+      ctx.lineTo(SNAKE_HEAD_RADIUS - 4, -SNAKE_HEAD_RADIUS - 2);
+      ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, -SNAKE_HEAD_RADIUS + 4);
+      ctx.lineTo(-SNAKE_HEAD_RADIUS - 2, 0);
+      ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, SNAKE_HEAD_RADIUS - 4);
+      ctx.lineTo(SNAKE_HEAD_RADIUS - 4, SNAKE_HEAD_RADIUS + 2);
+      ctx.closePath();
+      ctx.stroke();
 
-    // Glowing Neon Visor Eyes
-    ctx.fillStyle = '#00f0ff';
-    ctx.shadowColor = '#00f0ff';
-    ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.moveTo(10, -9);
-    ctx.lineTo(15, -7);
-    ctx.lineTo(9, -6);
-    ctx.closePath();
-    ctx.fill();
+      // Inner faceted wireframe armor lines
+      ctx.strokeStyle = '#38bdf8aa';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0);
+      ctx.lineTo(2, -8);
+      ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, -SNAKE_HEAD_RADIUS + 4);
 
-    ctx.beginPath();
-    ctx.moveTo(10, 9);
-    ctx.lineTo(15, 7);
-    ctx.lineTo(9, 6);
-    ctx.closePath();
-    ctx.fill();
+      ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0);
+      ctx.lineTo(2, 8);
+      ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, SNAKE_HEAD_RADIUS - 4);
+
+      ctx.moveTo(2, -8);
+      ctx.lineTo(-SNAKE_HEAD_RADIUS - 2, 0);
+      ctx.lineTo(2, 8);
+      ctx.stroke();
+
+      // Twin Heavy Forward Railgun Cannons (Head Arsenal)
+      ctx.strokeStyle = '#00f0ff';
+      ctx.lineWidth = 2.2;
+      // Left Railgun
+      ctx.beginPath();
+      ctx.moveTo(6, -12);
+      ctx.lineTo(28, -12);
+      ctx.moveTo(12, -15);
+      ctx.lineTo(12, -9);
+      ctx.moveTo(20, -15);
+      ctx.lineTo(20, -9);
+      // Right Railgun
+      ctx.moveTo(6, 12);
+      ctx.lineTo(28, 12);
+      ctx.moveTo(12, 9);
+      ctx.lineTo(12, 15);
+      ctx.moveTo(20, 9);
+      ctx.lineTo(20, 15);
+      ctx.stroke();
+
+      // Center Heavy Plasma Mortar Chamber (Pulsing Diamond)
+      const plasmaPulse = (Math.sin(time * 8) + 1) * 2;
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(16 + plasmaPulse, 0);
+      ctx.lineTo(8, -5);
+      ctx.lineTo(0, 0);
+      ctx.lineTo(8, 5);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Glowing Neon Visor Eyes
+      ctx.fillStyle = '#00f0ff';
+      ctx.shadowColor = '#00f0ff';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.moveTo(10, -9);
+      ctx.lineTo(15, -7);
+      ctx.lineTo(9, -6);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(10, 9);
+      ctx.lineTo(15, 7);
+      ctx.lineTo(9, 6);
+      ctx.closePath();
+      ctx.fill();
+    }
 
     // Active Resonant Energy Shield Mesh Aura
     if (this.snakeShield > 0) {
