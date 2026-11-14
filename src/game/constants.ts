@@ -26,7 +26,7 @@ export const TURRET_CATALOG: Record<TurretType, TurretDefinition> = {
     rarity: 'rare',
     baseDamage: 65,
     fireInterval: 0.95,
-    color: '#a855f7', // Purple
+    color: '#3b82f6', // Cobalt blue
     range: 580,
     icon: 'Radio',
   },
@@ -38,7 +38,7 @@ export const TURRET_CATALOG: Record<TurretType, TurretDefinition> = {
     rarity: 'rare',
     baseDamage: 40,
     fireInterval: 0.75,
-    color: '#06b6d4', // Cyan
+    color: '#00f0ff', // Electric cyan blue
     range: 500,
     icon: 'Zap',
   },
@@ -50,19 +50,19 @@ export const TURRET_CATALOG: Record<TurretType, TurretDefinition> = {
     rarity: 'common',
     baseDamage: 20,
     fireInterval: 0.45,
-    color: '#67e8f9', // Ice blue
+    color: '#60a5fa', // Azure frost blue
     range: 540,
     icon: 'Snowflake',
   },
   FLAME: {
     type: 'FLAME',
     name: 'Flame Projector',
-    nameZh: '熾熱地獄火發射器',
-    description: '大幅擴展的扇形超高溫烈焰，令整片扇區敵人陷入持續灼燒。',
+    nameZh: '超能蒼藍烈焰發射器',
+    description: '大幅擴展的扇形超高溫蒼藍烈焰，令整片扇區敵人陷入持續灼燒。',
     rarity: 'common',
     baseDamage: 32,
     fireInterval: 0.35,
-    color: '#f97316', // Orange
+    color: '#0284c7', // Cerulean blue fire
     range: 380,
     icon: 'Flame',
   },
@@ -70,11 +70,11 @@ export const TURRET_CATALOG: Record<TurretType, TurretDefinition> = {
     type: 'LASER',
     name: 'Laser Lance',
     nameZh: '超載貫穿雷射軸',
-    description: '超長距離直達戰場邊緣的毀滅光束，瞬間蒸發路徑上所有幾何單位。',
+    description: '超長距離直達戰場邊緣的深藍光束，瞬間蒸發路徑上所有幾何單位。',
     rarity: 'epic',
     baseDamage: 60,
     fireInterval: 1.0,
-    color: '#ef4444', // Red
+    color: '#2563eb', // Royal blue
     range: 720,
     icon: 'Activity',
   },
@@ -86,7 +86,7 @@ export const TURRET_CATALOG: Record<TurretType, TurretDefinition> = {
     rarity: 'epic',
     baseDamage: 26,
     fireInterval: 0.4,
-    color: '#22c55e', // Emerald
+    color: '#38bdf8', // Cyan blue
     range: 480,
     icon: 'Disc',
   },
@@ -98,19 +98,19 @@ export const TURRET_CATALOG: Record<TurretType, TurretDefinition> = {
     rarity: 'rare',
     baseDamage: 85,
     fireInterval: 1.1,
-    color: '#eab308', // Yellow
+    color: '#0ea5e9', // Ocean blue
     range: 120,
     icon: 'Bomb',
   },
   VENOM_TRAIL: {
     type: 'VENOM_TRAIL',
     name: 'Venom Sprayer',
-    nameZh: '強酸腐蝕尾流閥',
+    nameZh: '深藍腐蝕尾流閥',
     description: '在移動軌跡上留下大範圍強酸泥淖，敵軍踏入防禦瓦解並劇烈失血。',
     rarity: 'common',
     baseDamage: 25,
     fireInterval: 0.3,
-    color: '#84cc16', // Lime
+    color: '#0369a1', // Deep azure blue
     range: 100,
     icon: 'Droplets',
   },
@@ -122,7 +122,7 @@ export const TURRET_CATALOG: Record<TurretType, TurretDefinition> = {
     rarity: 'legendary',
     baseDamage: 45,
     fireInterval: 2.8,
-    color: '#6366f1', // Indigo
+    color: '#00f0ff', // Cyan blue
     range: 350,
     icon: 'Shield',
   },

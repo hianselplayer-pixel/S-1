@@ -127,6 +127,7 @@ export class GameEngine {
 
   // Gacha & Gear modifiers
   public gachaStats?: CombinedGachaStats;
+  public equippedAvatar: string = 'vanguard_striker';
 
   // Synchronized Harmonic Rhythm System (全域同步向心律動防禦系統)
   public rhythmTimer: number = 0;
@@ -172,11 +173,14 @@ export class GameEngine {
   private loopCheckTimer: number = 0;
   private meta: MetaUpgrades;
 
-  constructor(canvas: HTMLCanvasElement, meta: MetaUpgrades, gachaStats?: CombinedGachaStats) {
+  constructor(canvas: HTMLCanvasElement, meta: MetaUpgrades, gachaStats?: CombinedGachaStats, equippedAvatar?: string) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.meta = meta;
     this.gachaStats = gachaStats;
+    if (equippedAvatar) {
+      this.equippedAvatar = equippedAvatar;
+    }
 
     this.applyMetaUpgrades();
     this.initSnake();
@@ -522,16 +526,20 @@ export class GameEngine {
   public waveKills: number = 0;
 
   private updateWave(dt: number) {
-    // Check stage clear: must clear current wave enemies before advancing to next wave!
+    // 正常倒數波次計時
+    this.waveTimer -= dt;
+
+    // 波次前進條件：倒數結束 (或波次擊殺數達標)，且非 Boss 波次 (或 Boss 已被擊殺)
     const hasBoss = this.enemies.some((e) => e.isBoss);
     const waveQuotaMet = this.wave === 3 || this.wave === 5
-      ? !hasBoss && this.enemies.length === 0
-      : this.waveKills >= 22 && this.enemies.length === 0;
+      ? !hasBoss && this.waveTimer <= 0
+      : (this.waveTimer <= 0 || this.waveKills >= 22);
 
     if (waveQuotaMet) {
       if (this.wave < TOTAL_WAVES) {
         this.wave += 1;
         this.waveKills = 0;
+        this.waveTimer = WAVE_DURATION;
         this.stats.wavesCleared += 1;
         sound.playLevelUp();
         this.addDamageNumber(this.snakeX, this.snakeY - 50, `✨ 第 ${this.wave - 1} 關突破！進入第 ${this.wave} 關`, '#38bdf8');
@@ -550,10 +558,10 @@ export class GameEngine {
       }
     }
 
-    // Gradual, rhythmic enemy spawning (初期少數、慢慢增加)
+    // Gradual, rhythmic enemy spawning (初期少數、隨等級與波次動態增加)
     this.enemySpawnTimer += dt;
-    // 第 1 波間隔約 3.6 秒，後續隨波次平緩縮短
-    const spawnInterval = Math.max(1.2, 3.6 - (this.wave - 1) * 0.55);
+    // 間隔隨等級與波次平緩縮短
+    const spawnInterval = Math.max(0.8, 3.4 - (this.wave - 1) * 0.45 - (this.level - 1) * 0.12);
     if (this.enemySpawnTimer >= spawnInterval) {
       this.enemySpawnTimer = 0;
       this.spawnEnemyPack();
@@ -562,11 +570,11 @@ export class GameEngine {
 
   /**
    * Spawns structured tactical formations/arrays of geometric enemies!
-   * 一開始少數 (Wave 1 約 3~4 隻)，隨波次與戰鬥時間慢慢增加，並有場上總量限制
+   * 一開始少數 (Wave 1 約 3~4 隻)，隨波次、戰鬥時間與玩家等級增加出怪量
    */
   private spawnEnemyPack() {
-    // 場上敵機上限隨波次平緩遞增，初期嚴格控管 (第 1 波上限 14 隻，不再湧出大群)
-    const maxActiveEnemies = Math.min(100, 14 + (this.wave - 1) * 18);
+    // 場上敵機上限隨波次與玩家等級平緩遞增
+    const maxActiveEnemies = Math.min(100, 14 + (this.wave - 1) * 15 + (this.level - 1) * 4);
     if (this.enemies.length >= maxActiveEnemies) return;
 
     const candidateTypes: EnemyType[] = ['geo_triangle', 'geo_vortex_triangle'];
@@ -578,10 +586,10 @@ export class GameEngine {
     const primaryType = candidateTypes[Math.floor(Math.random() * candidateTypes.length)];
     const supportType = candidateTypes[Math.floor(Math.random() * candidateTypes.length)];
 
-    // 出場同心環陣列進攻：一開始少數 (Wave 1 約 3~4 隻)，隨波次與戰鬥時間慢慢增加
-    const baseCount = 3 + (this.wave - 1) * 2;
-    const timeProgress = Math.min(4, Math.floor((WAVE_DURATION - this.waveTimer) / 15));
-    const count = Math.min(16, baseCount + Math.max(0, timeProgress));
+    // 出場同心環陣列進攻：隨波次、時間進度與玩家等級動態增加單批生成量
+    const baseCount = 3 + (this.wave - 1) * 2 + Math.floor((this.level - 1) * 1.5);
+    const timeProgress = Math.min(5, Math.floor((WAVE_DURATION - this.waveTimer) / 12));
+    const count = Math.min(24, baseCount + Math.max(0, timeProgress));
     const spawnRingRadius = ARENA_RADIUS + 80;
     const startAngle = Math.random() * Math.PI * 2;
 
@@ -625,7 +633,7 @@ export class GameEngine {
         baseHp = 130 * hpScale; // Heavy armor
         speed = 75;
         radius = 20;
-        color = '#f59e0b'; // Amber
+        color = '#dc2626'; // Deep Crimson
         damage = 26 * dmgScale;
         rotSpeed = 0.03;
         movePattern = 'direct';
@@ -635,7 +643,7 @@ export class GameEngine {
         baseHp = 70 * hpScale;
         speed = 90;
         radius = 18;
-        color = '#a855f7'; // Purple
+        color = '#f43f5e'; // Rose Red
         damage = 18 * dmgScale;
         rotSpeed = 0.04;
         movePattern = 'direct';
@@ -645,7 +653,7 @@ export class GameEngine {
         baseHp = 45 * hpScale;
         speed = 120;
         radius = 14;
-        color = '#06b6d4'; // Cyan
+        color = '#e11d48'; // Ruby Red
         damage = 12 * dmgScale;
         rotSpeed = 0.06;
         movePattern = 'direct';
@@ -655,7 +663,7 @@ export class GameEngine {
         baseHp = 60 * hpScale;
         speed = 140;
         radius = 16;
-        color = '#10b981'; // Emerald
+        color = '#f87171'; // Light Red Coral
         damage = 22 * dmgScale;
         rotSpeed = 0.07;
         movePattern = 'flank';
@@ -665,7 +673,7 @@ export class GameEngine {
         baseHp = 220 * hpScale; // Heavy juggernaut
         speed = 70;
         radius = 26;
-        color = '#f97316'; // Orange
+        color = '#b91c1c'; // Blood Red
         damage = 36 * dmgScale;
         rotSpeed = 0.02;
         isElite = true;
@@ -676,18 +684,18 @@ export class GameEngine {
         baseHp = 35 * hpScale;
         speed = 180; // High speed kamikaze
         radius = 16;
-        color = '#eab308'; // Bright yellow
+        color = '#fb7185'; // Salmon Red
         damage = 55 * dmgScale;
         rotSpeed = 0.14;
         movePattern = 'direct';
         break;
 
-      // --- 5 NEW GEOMETRIC FOES ---
+      // --- 5 NEW GEOMETRIC FOES (All tuned to Red color spectrum) ---
       case 'geo_vortex_triangle':
         baseHp = 65 * hpScale;
         speed = 135;
         radius = 17;
-        color = '#00f0ff'; // Electric Cyan
+        color = '#f43f5e'; // Bright Rose Red
         damage = 18 * dmgScale;
         rotSpeed = 0.12;
         movePattern = 'direct';
@@ -697,7 +705,7 @@ export class GameEngine {
         baseHp = 95 * hpScale;
         speed = 85;
         radius = 21;
-        color = '#ec4899'; // Hot Neon Pink
+        color = '#e11d48'; // Vivid Red
         damage = 24 * dmgScale;
         rotSpeed = 0.05;
         movePattern = 'direct';
@@ -707,7 +715,7 @@ export class GameEngine {
         baseHp = 75 * hpScale;
         speed = 160;
         radius = 16;
-        color = '#38bdf8'; // Sky Blue
+        color = '#ef4444'; // Pure Red
         damage = 20 * dmgScale;
         rotSpeed = 0.04;
         movePattern = 'dive_dash';
@@ -717,7 +725,7 @@ export class GameEngine {
         baseHp = 80 * hpScale;
         speed = 115;
         radius = 18;
-        color = '#c084fc'; // Light Violet
+        color = '#fda4af'; // Pale Rose Red
         damage = 16 * dmgScale;
         rotSpeed = 0.06;
         movePattern = 'sine';
@@ -727,7 +735,7 @@ export class GameEngine {
         baseHp = 180 * hpScale;
         speed = 65;
         radius = 22;
-        color = '#34d399'; // Mint Green
+        color = '#991b1b'; // Dark Red Iron
         damage = 30 * dmgScale;
         rotSpeed = 0.025;
         movePattern = 'phalanx';
@@ -793,14 +801,14 @@ export class GameEngine {
     let bossType: EnemyType = 'boss_tesseract';
     let bossHp = 680000; // 調整為 1/10
     let bossRadius = 110;
-    let bossColor = '#ec4899';
+    let bossColor = '#f43f5e';
     let bossName = '超維泰坦·幾何巨擘';
 
     if (this.wave === 3) {
       bossType = 'boss_tesseract';
       bossHp = 680000;
       bossRadius = 110; // Big Tesseract
-      bossColor = '#ec4899'; // Neon pink
+      bossColor = '#f43f5e'; // Crimson Pink
       bossName = '超維泰坦·幾何巨擘';
     } else if (this.wave === 5) {
       bossType = 'boss_world_eater';
@@ -812,7 +820,7 @@ export class GameEngine {
       bossType = 'boss_void_star';
       bossHp = (15000 + this.wave * 1200) * 10; // 調整為 1/10
       bossRadius = 130;
-      bossColor = '#8b5cf6'; // Violet
+      bossColor = '#e11d48'; // Ruby Red
       bossName = '虛空湮滅星核·主宰';
     }
 
@@ -1035,8 +1043,8 @@ export class GameEngine {
         }
 
         case 'LASER': {
-          // Twin forward laser lance array with high-energy lens bloom
-          this.addMuzzleFlash(this.snakeX + Math.cos(this.snakeAngle) * 24, this.snakeY + Math.sin(this.snakeAngle) * 24, aimAngle, 'LASER', '#ef4444');
+          // Twin forward laser lance array with high-energy lens bloom (Cyber Blue)
+          this.addMuzzleFlash(this.snakeX + Math.cos(this.snakeAngle) * 24, this.snakeY + Math.sin(this.snakeAngle) * 24, aimAngle, 'LASER', '#00f0ff');
           const laserRange = headRange * 1.2;
           const endX = this.snakeX + Math.cos(aimAngle) * laserRange;
           const endY = this.snakeY + Math.sin(aimAngle) * laserRange;
@@ -1049,7 +1057,7 @@ export class GameEngine {
             vy: 0,
             radius: 5,
             damage,
-            color: '#ef4444',
+            color: '#00f0ff',
             source: 'player',
             duration: 0.15,
             isLaser: true,
@@ -1068,8 +1076,8 @@ export class GameEngine {
         }
 
         case 'PLASMA': {
-          // Heavy plasma mortar from head with shockwave ring
-          this.addMuzzleFlash(this.snakeX + Math.cos(this.snakeAngle) * 20, this.snakeY + Math.sin(this.snakeAngle) * 20, aimAngle, 'PLASMA', '#a855f7');
+          // Heavy plasma mortar from head with shockwave ring (Cobalt Blue)
+          this.addMuzzleFlash(this.snakeX + Math.cos(this.snakeAngle) * 20, this.snakeY + Math.sin(this.snakeAngle) * 20, aimAngle, 'PLASMA', '#3b82f6');
           this.projectiles.push({
             id: Math.random().toString(),
             x: this.snakeX,
@@ -1078,7 +1086,7 @@ export class GameEngine {
             vy: Math.sin(aimAngle) * 440,
             radius: 11,
             damage: damage * 1.3,
-            color: '#a855f7',
+            color: '#3b82f6',
             source: 'player',
             duration: 1.6,
             aoeRadius: 110 + hw.level * 15,
@@ -1087,8 +1095,8 @@ export class GameEngine {
         }
 
         case 'TESLA': {
-          // Chain lightning from snake horn
-          this.addMuzzleFlash(this.snakeX, this.snakeY, aimAngle, 'TESLA', '#06b6d4');
+          // Chain lightning from snake horn (Sky Blue)
+          this.addMuzzleFlash(this.snakeX, this.snakeY, aimAngle, 'TESLA', '#38bdf8');
           this.triggerTeslaArc(this.snakeX, this.snakeY, targetEnemy, damage, 4 + hw.level);
           break;
         }
@@ -1231,7 +1239,7 @@ export class GameEngine {
     for (let c = 0; c < maxChains && currentTarget; c++) {
       hitSet.add(currentTarget.id);
       this.applyDamageToEnemy(currentTarget, damage * Math.pow(0.88, c), 'Tesla Spire');
-      this.addLightningEffect(prevX, prevY, currentTarget.x, currentTarget.y, '#06b6d4');
+      this.addLightningEffect(prevX, prevY, currentTarget.x, currentTarget.y, '#38bdf8');
 
       prevX = currentTarget.x;
       prevY = currentTarget.y;
@@ -1295,7 +1303,7 @@ export class GameEngine {
             vy: Math.sin(shotAngle) * 600,
             radius: 4,
             damage: drone.damage,
-            color: '#4ade80',
+            color: '#38bdf8',
             source: 'player',
             duration: 1.0,
           });
@@ -1617,7 +1625,7 @@ export class GameEngine {
               vy: Math.sin(shotA) * 230,
               radius: 6,
               damage: enemy.damage,
-              color: '#c084fc',
+              color: '#f43f5e',
               source: 'enemy',
               duration: 2.8,
               shape: 'shard',
@@ -1637,7 +1645,7 @@ export class GameEngine {
               vy: Math.sin(shotA) * 210,
               radius: 8,
               damage: enemy.damage * 0.9,
-              color: '#00f0ff',
+              color: '#ef4444',
               source: 'enemy',
               duration: 3.0,
               shape: 'crescent',
@@ -1656,7 +1664,7 @@ export class GameEngine {
             vy: Math.sin(inwardAngle) * 95,
             radius: 14,
             damage: enemy.damage * 1.3,
-            color: '#ec4899',
+            color: '#e11d48',
             source: 'enemy',
             duration: 3.2,
             shape: 'ring',
@@ -1677,7 +1685,7 @@ export class GameEngine {
               vy: Math.sin(inwardAngle) * 210,
               radius: 6,
               damage: enemy.damage * 1.1,
-              color: '#38bdf8',
+              color: '#dc2626',
               source: 'enemy',
               duration: 2.4,
               shape: 'shard',
@@ -1698,7 +1706,7 @@ export class GameEngine {
               baseVy: Math.sin(inwardAngle) * 190,
               radius: 7,
               damage: enemy.damage,
-              color: '#a855f7',
+              color: '#fb7185',
               source: 'enemy',
               duration: 3.0,
               shape: 'helix_orb',
@@ -1720,7 +1728,7 @@ export class GameEngine {
               vy: Math.sin(crossA) * 180,
               radius: 7,
               damage: enemy.damage * 0.9,
-              color: '#34d399',
+              color: '#991b1b',
               source: 'enemy',
               duration: 2.6,
               shape: 'cross',
@@ -1738,7 +1746,7 @@ export class GameEngine {
             vy: Math.sin(inwardAngle) * 170,
             radius: 11,
             damage: enemy.damage * 1.5,
-            color: '#f97316',
+            color: '#b91c1c',
             source: 'enemy',
             duration: 2.8,
             shape: 'diamond',
@@ -1794,7 +1802,7 @@ export class GameEngine {
                 vy: Math.sin(bAngle) * 230,
                 radius: 9,
                 damage: enemy.damage,
-                color: '#a855f7',
+                color: '#e11d48',
                 source: 'enemy',
                 duration: 3.6,
                 shape: 'helix_orb',
@@ -1813,7 +1821,7 @@ export class GameEngine {
                 vy: Math.sin(bAngle) * 220,
                 radius: 10,
                 damage: enemy.damage,
-                color: '#ef4444',
+                color: '#dc2626',
                 source: 'enemy',
                 duration: 3.8,
                 shape: 'shard',
@@ -2628,8 +2636,8 @@ export class GameEngine {
     const bossTitle = boss.type === 'boss_tesseract'
       ? '⚠️ BOSS: 超維泰坦·幾何巨擘'
       : boss.type === 'boss_world_eater'
-      ? '⚠️ BOSS: 終焉星蝕·萬象幾何原初巨神'
-      : '⚠️ BOSS: 虛空湮滅星核·主宰';
+        ? '⚠️ BOSS: 終焉星蝕·萬象幾何原初巨神'
+        : '⚠️ BOSS: 虛空湮滅星核·主宰';
     ctx.fillText(`${bossTitle} [10層超維防護壁]`, barX, barY - 8);
 
     // Right side: Remaining Total HP
@@ -2855,8 +2863,8 @@ export class GameEngine {
   private drawFloorHazards(ctx: CanvasRenderingContext2D) {
     for (const p of this.venomPuddles) {
       ctx.save();
-      ctx.fillStyle = '#84cc1633';
-      ctx.strokeStyle = '#84cc1688';
+      ctx.fillStyle = '#0284c733';
+      ctx.strokeStyle = '#38bdf888';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
@@ -3218,21 +3226,40 @@ export class GameEngine {
       ctx.restore();
     }
 
-    // --- NEON LAYER 8: Snake Head (Neon Cyber Dreadnought Dragon Warhead) ---
+    // --- NEON LAYER 8: Snake Head (Neon Cyber Dreadnought Dragon Warhead - Models tailored by Avatar) ---
     ctx.save();
     ctx.translate(this.snakeX, this.snakeY);
     ctx.rotate(this.snakeAngle);
 
+    const avatarId = this.equippedAvatar || 'vanguard_striker';
+    let primaryHeadColor = '#00f0ff';
+    let secondaryHeadColor = '#38bdf8';
+    let eyeColor = '#00f0ff';
+
+    if (avatarId === 'titan_aegis') {
+      primaryHeadColor = '#38bdf8'; // Heavy Cobalt
+      secondaryHeadColor = '#60a5fa';
+      eyeColor = '#93c5fd';
+    } else if (avatarId === 'void_conductor') {
+      primaryHeadColor = '#2563eb'; // Deep Quantum Blue
+      secondaryHeadColor = '#38bdf8';
+      eyeColor = '#00f0ff';
+    } else if (avatarId === 'fission_archon') {
+      primaryHeadColor = '#1d4ed8'; // Imperial Royal Blue
+      secondaryHeadColor = '#67e8f9';
+      eyeColor = '#ffffff';
+    }
+
     if (this.isDashing) {
       // 衝刺狀態：機械血盆大口完全張開！展開機械獠牙與狂暴吞噬漩渦
-      ctx.shadowColor = '#f43f5e';
+      ctx.shadowColor = '#00f0ff';
       ctx.shadowBlur = 24;
 
-      // 吞噬黑洞引力漩渦核心 (Devouring Singularity Vortex)
+      // 吞噬引力漩渦核心 (Devouring Singularity Vortex - 科技能量藍)
       const vortexGrad = ctx.createRadialGradient(8, 0, 2, 8, 0, 20);
       vortexGrad.addColorStop(0, '#ffffff');
-      vortexGrad.addColorStop(0.35, '#f43f5e');
-      vortexGrad.addColorStop(0.85, '#881337');
+      vortexGrad.addColorStop(0.35, '#00f0ff');
+      vortexGrad.addColorStop(0.85, '#1e40af');
       vortexGrad.addColorStop(1, 'transparent');
       ctx.fillStyle = vortexGrad;
       ctx.beginPath();
@@ -3240,7 +3267,7 @@ export class GameEngine {
       ctx.fill();
 
       // 上顎 (Upper Jaw - 張開朝上)
-      ctx.strokeStyle = '#f43f5e';
+      ctx.strokeStyle = primaryHeadColor;
       ctx.lineWidth = 3.2;
       ctx.beginPath();
       ctx.moveTo(SNAKE_HEAD_RADIUS + 22, -14); // 上大獠牙尖端
@@ -3284,49 +3311,128 @@ export class GameEngine {
         ctx.fill();
       }
 
-      // 狂暴霓虹眼 (Furious Crimson Eyes)
-      ctx.fillStyle = '#f43f5e';
-      ctx.shadowColor = '#f43f5e';
+      // 狂暴霓虹眼 (Furious Cyan Eyes)
+      ctx.fillStyle = eyeColor;
+      ctx.shadowColor = eyeColor;
       ctx.shadowBlur = 14;
       ctx.fillRect(8, -14, 8, 3.5);
       ctx.fillRect(8, 11, 8, 3.5);
     } else {
-      // 正常閉合狀態：流線裝甲戰艦龍頭
-      ctx.shadowColor = '#00f0ff';
+      // 正常閉合狀態：根據機型展現專屬流線造型與裝甲輪廓
+      ctx.shadowColor = primaryHeadColor;
       ctx.shadowBlur = 16;
-      ctx.strokeStyle = '#00f0ff';
+      ctx.strokeStyle = primaryHeadColor;
       ctx.lineWidth = 2.8;
 
-      // Angular dragon/warhead prow geometry
-      ctx.beginPath();
-      ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0); // Extended prow beak
-      ctx.lineTo(SNAKE_HEAD_RADIUS - 4, -SNAKE_HEAD_RADIUS - 2);
-      ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, -SNAKE_HEAD_RADIUS + 4);
-      ctx.lineTo(-SNAKE_HEAD_RADIUS - 2, 0);
-      ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, SNAKE_HEAD_RADIUS - 4);
-      ctx.lineTo(SNAKE_HEAD_RADIUS - 4, SNAKE_HEAD_RADIUS + 2);
-      ctx.closePath();
-      ctx.stroke();
+      if (avatarId === 'titan_aegis') {
+        // --- SV-02 泰坦重盾：六角厚重裝甲戰艦突擊艦首 + 雙側重裝護盾格柵 ---
+        ctx.beginPath();
+        ctx.moveTo(SNAKE_HEAD_RADIUS + 12, -10);
+        ctx.lineTo(SNAKE_HEAD_RADIUS + 16, 0);
+        ctx.lineTo(SNAKE_HEAD_RADIUS + 12, 10);
+        ctx.lineTo(4, SNAKE_HEAD_RADIUS + 8);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS + 4, SNAKE_HEAD_RADIUS + 6);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS - 4, 0);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS + 4, -SNAKE_HEAD_RADIUS - 6);
+        ctx.lineTo(4, -SNAKE_HEAD_RADIUS - 8);
+        ctx.closePath();
+        ctx.stroke();
 
-      // Inner faceted wireframe armor lines
-      ctx.strokeStyle = '#38bdf8aa';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0);
-      ctx.lineTo(2, -8);
-      ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, -SNAKE_HEAD_RADIUS + 4);
+        // 雙側重盾防禦散熱翼 (Heavy Shield Winglets)
+        ctx.strokeStyle = secondaryHeadColor;
+        ctx.lineWidth = 2.0;
+        ctx.strokeRect(-8, -SNAKE_HEAD_RADIUS - 12, 16, 4);
+        ctx.strokeRect(-8, SNAKE_HEAD_RADIUS + 8, 16, 4);
 
-      ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0);
-      ctx.lineTo(2, 8);
-      ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, SNAKE_HEAD_RADIUS - 4);
+        // 內部六角裝甲加強筋
+        ctx.beginPath();
+        ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0);
+        ctx.lineTo(-4, 0);
+        ctx.moveTo(4, -SNAKE_HEAD_RADIUS - 8);
+        ctx.lineTo(-4, 0);
+        ctx.lineTo(4, SNAKE_HEAD_RADIUS + 8);
+        ctx.stroke();
+      } else if (avatarId === 'void_conductor') {
+        // --- SV-03 虛空超導：幾何晶刃箭頭 + 懸浮環狀量子引力微光光環 ---
+        ctx.beginPath();
+        ctx.moveTo(SNAKE_HEAD_RADIUS + 22, 0); // 銳利超導刺針艦艏
+        ctx.lineTo(SNAKE_HEAD_RADIUS - 6, -SNAKE_HEAD_RADIUS);
+        ctx.lineTo(-2, -SNAKE_HEAD_RADIUS + 2);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS + 4, -SNAKE_HEAD_RADIUS - 4);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS, 0);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS + 4, SNAKE_HEAD_RADIUS + 4);
+        ctx.lineTo(-2, SNAKE_HEAD_RADIUS - 2);
+        ctx.lineTo(SNAKE_HEAD_RADIUS - 6, SNAKE_HEAD_RADIUS);
+        ctx.closePath();
+        ctx.stroke();
 
-      ctx.moveTo(2, -8);
-      ctx.lineTo(-SNAKE_HEAD_RADIUS - 2, 0);
-      ctx.lineTo(2, 8);
-      ctx.stroke();
+        // 量子引力懸浮晶環 (Void Quantum Halo Ring)
+        ctx.strokeStyle = secondaryHeadColor;
+        ctx.lineWidth = 1.6;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.arc(-2, 0, SNAKE_HEAD_RADIUS + 12, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (avatarId === 'fission_archon') {
+        // --- SV-04 裂變巨神：四聯鋸齒毀滅皇冠龍首 + 側向外擴衝角 ---
+        ctx.beginPath();
+        ctx.moveTo(SNAKE_HEAD_RADIUS + 24, 0); // 帝王龍冠主角
+        ctx.lineTo(SNAKE_HEAD_RADIUS + 8, -6);
+        ctx.lineTo(SNAKE_HEAD_RADIUS + 18, -16); // 左側上巨角
+        ctx.lineTo(2, -SNAKE_HEAD_RADIUS - 6);
+        ctx.lineTo(-6, -SNAKE_HEAD_RADIUS - 10); // 左側後翼角
+        ctx.lineTo(-SNAKE_HEAD_RADIUS + 2, -SNAKE_HEAD_RADIUS);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS - 4, 0);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS + 2, SNAKE_HEAD_RADIUS);
+        ctx.lineTo(-6, SNAKE_HEAD_RADIUS + 10); // 右側後翼角
+        ctx.lineTo(2, SNAKE_HEAD_RADIUS + 6);
+        ctx.lineTo(SNAKE_HEAD_RADIUS + 18, 16); // 右側上巨角
+        ctx.lineTo(SNAKE_HEAD_RADIUS + 8, 6);
+        ctx.closePath();
+        ctx.stroke();
+
+        // 毀滅晶核裂痕 (Fission Rift Core)
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(SNAKE_HEAD_RADIUS + 12, 0);
+        ctx.lineTo(4, -4);
+        ctx.lineTo(0, 4);
+        ctx.lineTo(-8, 0);
+        ctx.stroke();
+      } else {
+        // --- SV-01 先鋒獵手：經典巡航高速截擊流線戰艦艏 ---
+        ctx.beginPath();
+        ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0); // Extended prow beak
+        ctx.lineTo(SNAKE_HEAD_RADIUS - 4, -SNAKE_HEAD_RADIUS - 2);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, -SNAKE_HEAD_RADIUS + 4);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS - 2, 0);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, SNAKE_HEAD_RADIUS - 4);
+        ctx.lineTo(SNAKE_HEAD_RADIUS - 4, SNAKE_HEAD_RADIUS + 2);
+        ctx.closePath();
+        ctx.stroke();
+
+        // Inner faceted wireframe armor lines
+        ctx.strokeStyle = secondaryHeadColor + 'aa';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0);
+        ctx.lineTo(2, -8);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, -SNAKE_HEAD_RADIUS + 4);
+
+        ctx.moveTo(SNAKE_HEAD_RADIUS + 16, 0);
+        ctx.lineTo(2, 8);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS + 8, SNAKE_HEAD_RADIUS - 4);
+
+        ctx.moveTo(2, -8);
+        ctx.lineTo(-SNAKE_HEAD_RADIUS - 2, 0);
+        ctx.lineTo(2, 8);
+        ctx.stroke();
+      }
 
       // Twin Heavy Forward Railgun Cannons (Head Arsenal)
-      ctx.strokeStyle = '#00f0ff';
+      ctx.strokeStyle = primaryHeadColor;
       ctx.lineWidth = 2.2;
       // Left Railgun
       ctx.beginPath();
@@ -3345,9 +3451,9 @@ export class GameEngine {
       ctx.lineTo(20, 15);
       ctx.stroke();
 
-      // Center Heavy Plasma Mortar Chamber (Pulsing Diamond)
+      // Center Heavy Plasma Mortar Chamber (Pulsing Diamond - Blue/Cyan)
       const plasmaPulse = (Math.sin(time * 8) + 1) * 2;
-      ctx.strokeStyle = '#a855f7';
+      ctx.strokeStyle = '#38bdf8';
       ctx.lineWidth = 2.0;
       ctx.beginPath();
       ctx.moveTo(16 + plasmaPulse, 0);
@@ -3358,8 +3464,8 @@ export class GameEngine {
       ctx.stroke();
 
       // Glowing Neon Visor Eyes
-      ctx.fillStyle = '#00f0ff';
-      ctx.shadowColor = '#00f0ff';
+      ctx.fillStyle = eyeColor;
+      ctx.shadowColor = eyeColor;
       ctx.shadowBlur = 10;
       ctx.beginPath();
       ctx.moveTo(10, -9);
@@ -3405,12 +3511,12 @@ export class GameEngine {
       const dy = this.snakeY + Math.sin(drone.angle) * drone.distance;
 
       ctx.save();
-      ctx.fillStyle = '#22c55e';
+      ctx.fillStyle = '#38bdf8';
       ctx.beginPath();
       ctx.arc(dx, dy, 6, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.strokeStyle = '#22c55e66';
+      ctx.strokeStyle = '#38bdf866';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(dx, dy, 11, 0, Math.PI * 2);

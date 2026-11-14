@@ -102,6 +102,9 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_GACHA, JSON.stringify(gachaInventory));
+    if (engineRef.current) {
+      engineRef.current.equippedAvatar = gachaInventory.equippedAvatar;
+    }
   }, [gachaInventory]);
 
   // Sync canvas size
@@ -148,7 +151,7 @@ export default function App() {
       engineRef.current.stop();
     }
 
-    const engine = new GameEngine(canvasRef.current, metaUpgrades, combinedGachaStats);
+    const engine = new GameEngine(canvasRef.current, metaUpgrades, combinedGachaStats, gachaInventory.equippedAvatar);
     engine.onLevelUp = handleLevelUp;
     engine.onGameOver = handleGameOver;
     engineRef.current = engine;
