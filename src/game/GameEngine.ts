@@ -734,8 +734,8 @@ export class GameEngine {
         break;
     }
 
-    // 怪物血量調整為 1/10 (即 100 倍基礎)
-    baseHp *= 100;
+    // 怪物血量縮減為 1/10 (由原本的 100 倍基礎調整為 10 倍基礎)
+    baseHp *= 10;
 
     // 依使用者指示全面縮放：轉得更慢約 1/8、動得更慢約 1/8、體型更小約 1/3
     speed = Math.max(8, Math.round(speed * 0.125));
@@ -791,26 +791,26 @@ export class GameEngine {
 
   private spawnBoss() {
     let bossType: EnemyType = 'boss_tesseract';
-    let bossHp = 6800000; // Reduced to 1/10th
+    let bossHp = 680000; // 調整為 1/10
     let bossRadius = 110;
     let bossColor = '#ec4899';
     let bossName = '超維泰坦·幾何巨擘';
 
     if (this.wave === 3) {
       bossType = 'boss_tesseract';
-      bossHp = 6800000;
+      bossHp = 680000;
       bossRadius = 110; // Big Tesseract
       bossColor = '#ec4899'; // Neon pink
       bossName = '超維泰坦·幾何巨擘';
     } else if (this.wave === 5) {
       bossType = 'boss_world_eater';
-      bossHp = 24000000; // Reduced to 1/10th
+      bossHp = 2400000; // 調整為 1/10
       bossRadius = 155; // Colossal 310px diameter!
       bossColor = '#dc2626'; // Blood red
       bossName = '終焉星蝕·萬象幾何原初巨神';
     } else {
       bossType = 'boss_void_star';
-      bossHp = (15000 + this.wave * 1200) * 100; // Reduced to 1/10th
+      bossHp = (15000 + this.wave * 1200) * 10; // 調整為 1/10
       bossRadius = 130;
       bossColor = '#8b5cf6'; // Violet
       bossName = '虛空湮滅星核·主宰';
@@ -2178,6 +2178,12 @@ export class GameEngine {
 
     const isCrit = Math.random() < this.critChance;
     let finalDamage = Math.round(amount * (isCrit ? 1.85 : 1.0));
+
+    // 回合遞增減傷系統 (Wave-based Damage Reduction: 1=+0%, 2=5%, 3=10%, 4=15%, 5=20%)
+    const waveDamageReduction = Math.min(0.20, Math.max(0, (this.wave - 1) * 0.05));
+    if (waveDamageReduction > 0) {
+      finalDamage = Math.max(1, Math.round(finalDamage * (1 - waveDamageReduction)));
+    }
 
     // Boss damage reduction & heavy armor protection (boss敵人會減傷 不要如此快就死)
     if (enemy.isBoss) {
