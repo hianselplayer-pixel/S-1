@@ -550,10 +550,10 @@ export class GameEngine {
       }
     }
 
-    // Massive swarm spawning
+    // Gradual, rhythmic enemy spawning (初期少數、慢慢增加)
     this.enemySpawnTimer += dt;
-    // Spawn frequency: spawns batches of enemies frequently
-    const spawnInterval = Math.max(0.35, 1.1 - this.wave * 0.1);
+    // 第 1 波間隔約 3.6 秒，後續隨波次平緩縮短
+    const spawnInterval = Math.max(1.2, 3.6 - (this.wave - 1) * 0.55);
     if (this.enemySpawnTimer >= spawnInterval) {
       this.enemySpawnTimer = 0;
       this.spawnEnemyPack();
@@ -561,14 +561,13 @@ export class GameEngine {
   }
 
   /**
-   * Spawns dense formations of geometric monsters!
-   */
-  /**
    * Spawns structured tactical formations/arrays of geometric enemies!
-   * Formations: V_FORMATION, PHALANX_WALL, SURROUND_RING, PINCER_FLANK, CONVOY_COLUMN
+   * 一開始少數 (Wave 1 約 3~4 隻)，隨波次與戰鬥時間慢慢增加，並有場上總量限制
    */
   private spawnEnemyPack() {
-    if (this.enemies.length > 200) return;
+    // 場上敵機上限隨波次平緩遞增，初期嚴格控管 (第 1 波上限 14 隻，不再湧出大群)
+    const maxActiveEnemies = Math.min(100, 14 + (this.wave - 1) * 18);
+    if (this.enemies.length >= maxActiveEnemies) return;
 
     const candidateTypes: EnemyType[] = ['geo_triangle', 'geo_vortex_triangle'];
     if (this.wave >= 2) candidateTypes.push('geo_hexagon', 'geo_square', 'geo_prism_dart');
@@ -579,8 +578,10 @@ export class GameEngine {
     const primaryType = candidateTypes[Math.floor(Math.random() * candidateTypes.length)];
     const supportType = candidateTypes[Math.floor(Math.random() * candidateTypes.length)];
 
-    // 出場要同一個環 陣列進攻
-    const count = Math.min(20, 10 + Math.floor(this.wave * 2));
+    // 出場同心環陣列進攻：一開始少數 (Wave 1 約 3~4 隻)，隨波次與戰鬥時間慢慢增加
+    const baseCount = 3 + (this.wave - 1) * 2;
+    const timeProgress = Math.min(4, Math.floor((WAVE_DURATION - this.waveTimer) / 15));
+    const count = Math.min(16, baseCount + Math.max(0, timeProgress));
     const spawnRingRadius = ARENA_RADIUS + 80;
     const startAngle = Math.random() * Math.PI * 2;
 
@@ -736,6 +737,11 @@ export class GameEngine {
     // 怪物血量調整為 1/10 (即 100 倍基礎)
     baseHp *= 100;
 
+    // 依使用者指示全面縮放：轉得更慢約 1/8、動得更慢約 1/8、體型更小約 1/3
+    speed = Math.max(8, Math.round(speed * 0.125));
+    rotSpeed *= 0.125;
+    radius = Math.max(5, Math.round(radius * 0.33));
+
     if (isElite) {
       baseHp *= 2.2;
       damage *= 1.4;
@@ -817,10 +823,10 @@ export class GameEngine {
       y: -140,
       angle: Math.PI / 2,
       rotation: 0,
-      rotationSpeed: 0.025,
+      rotationSpeed: 0.025 * 0.125,
       hp: bossHp,
       maxHp: bossHp,
-      speed: 55,
+      speed: Math.max(8, Math.round(55 * 0.125)),
       damage: 70,
       radius: bossRadius,
       color: bossColor,
@@ -3413,7 +3419,7 @@ export class GameEngine {
         const targetA = enemy.angle ?? Math.atan2(this.reactorY - enemy.y, this.reactorX - enemy.x);
         ctx.beginPath();
         ctx.moveTo(enemy.x, enemy.y);
-        ctx.lineTo(enemy.x + Math.cos(targetA) * 85, enemy.y + Math.sin(targetA) * 85);
+        ctx.lineTo(enemy.x + Math.cos(targetA) * 50, enemy.y + Math.sin(targetA) * 50);
         ctx.stroke();
         ctx.restore();
       }
@@ -3430,12 +3436,12 @@ export class GameEngine {
 
       ctx.restore();
 
-      // Enemy HP Bar
+      // Enemy HP Bar (適應縮小後的 1/3 敵人體型)
       if (enemy.hp < enemy.maxHp || enemy.isBoss || enemy.isElite) {
-        const barW = enemy.isBoss ? Math.max(180, enemy.radius * 1.5) : enemy.isElite ? 42 : 28;
-        const barH = enemy.isBoss ? 8 : 4;
+        const barW = enemy.isBoss ? Math.max(180, enemy.radius * 1.5) : enemy.isElite ? 22 : 14;
+        const barH = enemy.isBoss ? 8 : 2;
         const ratio = Math.max(0, enemy.hp / enemy.maxHp);
-        const yOffset = enemy.isBoss ? enemy.radius + 20 : enemy.radius + 12;
+        const yOffset = enemy.isBoss ? enemy.radius + 20 : enemy.radius + 6;
 
         ctx.fillStyle = '#1e293b';
         ctx.fillRect(enemy.x - barW / 2, enemy.y - yOffset, barW, barH);
