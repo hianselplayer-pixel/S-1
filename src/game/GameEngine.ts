@@ -128,6 +128,13 @@ export class GameEngine {
   // Gacha & Gear modifiers
   public gachaStats?: CombinedGachaStats;
 
+  // Synchronized Harmonic Rhythm System (全域同步向心律動防禦系統)
+  public rhythmTimer: number = 0;
+  public rhythmPrevCycle: number = 0;
+  public readonly RHYTHM_CYCLE: number = 2.4; // 2.4 秒完整律動拍點
+  public readonly RHYTHM_MOVE_LIMIT: number = 1.5; // 前 1.5 秒同步推進
+  public readonly RHYTHM_CHARGE_START: number = 0.95; // 0.95s ~ 1.5s 蓄力預警瞄準
+
   // Input
   public keys: Record<string, boolean> = {};
   public mousePos: { x: number; y: number } | null = null;
@@ -1600,6 +1607,21 @@ export class GameEngine {
       this.lastBossLayer = 10;
     }
 
+    // Synchronized Harmonic Rhythm: Update global rhythm timeline & triggers
+    this.rhythmTimer += dt;
+    const cycleTime = this.rhythmTimer % this.RHYTHM_CYCLE;
+    const isMovingPhase = cycleTime < this.RHYTHM_MOVE_LIMIT;
+    const isChargingPhase = cycleTime >= this.RHYTHM_CHARGE_START && cycleTime < this.RHYTHM_MOVE_LIMIT;
+    const chargeProgress = isChargingPhase
+      ? (cycleTime - this.RHYTHM_CHARGE_START) / (this.RHYTHM_MOVE_LIMIT - this.RHYTHM_CHARGE_START)
+      : 0;
+
+    // Trigger simultaneous inward salvo at the exact moment movement stops
+    const shouldFireSalvo = this.rhythmPrevCycle < this.RHYTHM_MOVE_LIMIT && cycleTime >= this.RHYTHM_MOVE_LIMIT;
+    this.rhythmPrevCycle = cycleTime;
+
+    let playedSalvoSound = false;
+
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const enemy = this.enemies[i];
 
@@ -1616,12 +1638,13 @@ export class GameEngine {
       }
 
       const speedFactor = enemy.slowTimer > 0 ? 0.5 : 1.0;
-      const globalTime = performance.now() / 1000;
-      const cycleTime = globalTime % 2.3;
-      const rhythmMultiplier = (cycleTime < 1.5 || enemy.isBoss) ? 1.0 : 0.0;
+      const rhythmMultiplier = (isMovingPhase || enemy.isBoss) ? 1.0 : 0.0;
       const currentSpeed = enemy.speed * speedFactor * rhythmMultiplier;
 
-      // Target selection
+      enemy.isCharging = isChargingPhase;
+      enemy.chargeProgress = chargeProgress;
+
+      // Target selection: Primary target is Prometheus Reactor Core, or Snake Head when close
       const distToSnake = Math.hypot(this.snakeX - enemy.x, this.snakeY - enemy.y);
       let targetX = this.reactorX;
       let targetY = this.reactorY;
@@ -1631,241 +1654,234 @@ export class GameEngine {
         targetY = this.snakeY;
       }
 
-      const angle = Math.atan2(targetY - enemy.y, targetX - enemy.x);
-      enemy.angle = angle;
+      // Synchronized inward aiming angle: locks trajectory pointed directly inward towards center
+      const inwardAngle = Math.atan2(targetY - enemy.y, targetX - enemy.x);
+      enemy.angle = inwardAngle;
       enemy.moveTimer = (enemy.moveTimer || 0) + dt;
 
-      // --- DISTINCT ATTACK STYLES PER ENEMY TYPE ---
-      enemy.shootTimer = (enemy.shootTimer || 0) + dt;
+      // --- SYNCHRONIZED SIMULTANEOUS SALVO ATTACKS (全部敵機同時向心發射) ---
+      if (shouldFireSalvo) {
+        if (!playedSalvoSound && this.enemies.length > 0) {
+          sound.playSynchronizedSalvo();
+          playedSalvoSound = true;
+        }
 
-      // 1. Pentagon: 3-way geometric dart shotgun spread
-      if (enemy.type === 'geo_pentagon' && enemy.shootTimer >= 2.2) {
-        enemy.shootTimer = 0;
-        for (let s = -1; s <= 1; s++) {
-          const shotA = angle + s * 0.28;
-          this.projectiles.push({
-            id: Math.random().toString(),
-            x: enemy.x,
-            y: enemy.y,
-            vx: Math.cos(shotA) * 240,
-            vy: Math.sin(shotA) * 240,
-            radius: 6,
-            damage: enemy.damage,
-            color: '#c084fc',
-            source: 'enemy',
-            duration: 2.6,
-            shape: 'shard',
-            bulletPattern: 'linear',
-          });
-        }
-      }
-      // 2. Vortex Triangle: Shoots twin spiraling crescent shuriken darts
-      else if (enemy.type === 'geo_vortex_triangle' && enemy.shootTimer >= 2.1) {
-        enemy.shootTimer = 0;
-        for (const dir of [-1, 1]) {
-          const shotA = angle + dir * 0.4;
-          this.projectiles.push({
-            id: Math.random().toString(),
-            x: enemy.x,
-            y: enemy.y,
-            vx: Math.cos(shotA) * 210,
-            vy: Math.sin(shotA) * 210,
-            radius: 8,
-            damage: enemy.damage * 0.9,
-            color: '#00f0ff',
-            source: 'enemy',
-            duration: 3.0,
-            shape: 'crescent',
-            bulletPattern: 'spiral',
-            curveSpeed: dir * 2.8,
-          });
-        }
-      }
-      // 3. Pulsar Ring: Emits expanding ring shockwave wave
-      else if (enemy.type === 'geo_pulsar_ring' && enemy.shootTimer >= 3.0) {
-        enemy.shootTimer = 0;
-        this.projectiles.push({
-          id: Math.random().toString(),
-          x: enemy.x,
-          y: enemy.y,
-          vx: Math.cos(angle) * 70,
-          vy: Math.sin(angle) * 70,
-          radius: 14,
-          damage: enemy.damage * 1.3,
-          color: '#ec4899',
-          source: 'enemy',
-          duration: 3.2,
-          shape: 'ring',
-          bulletPattern: 'ring',
-        });
-      }
-      // 4. Prism Dart: Fires supersonic twin accelerating rail-shards
-      else if (enemy.type === 'geo_prism_dart' && enemy.shootTimer >= 1.9) {
-        enemy.shootTimer = 0;
-        for (const off of [-7, 7]) {
-          const perpA = angle + Math.PI / 2;
-          const sx = enemy.x + Math.cos(perpA) * off;
-          const sy = enemy.y + Math.sin(perpA) * off;
-          this.projectiles.push({
-            id: Math.random().toString(),
-            x: sx,
-            y: sy,
-            vx: Math.cos(angle) * 120,
-            vy: Math.sin(angle) * 120,
-            radius: 6,
-            damage: enemy.damage * 1.1,
-            color: '#38bdf8',
-            source: 'enemy',
-            duration: 2.2,
-            shape: 'shard',
-            bulletPattern: 'accel',
-          });
-        }
-      }
-      // 5. Helix Spiral: Fires dual sine-wave undulating plasma orbs
-      else if (enemy.type === 'geo_helix_spiral' && enemy.shootTimer >= 2.0) {
-        enemy.shootTimer = 0;
-        for (const freqMult of [-1, 1]) {
-          this.projectiles.push({
-            id: Math.random().toString(),
-            x: enemy.x,
-            y: enemy.y,
-            vx: Math.cos(angle) * 190,
-            vy: Math.sin(angle) * 190,
-            baseVx: Math.cos(angle) * 190,
-            baseVy: Math.sin(angle) * 190,
-            radius: 7,
-            damage: enemy.damage,
-            color: '#a855f7',
-            source: 'enemy',
-            duration: 3.2,
-            shape: 'helix_orb',
-            bulletPattern: 'sine',
-            amplitude: 140 * freqMult,
-            frequency: 7.0,
-          });
-        }
-      }
-      // 6. Monolith Sentinel Cube: Fires 4-point rotating crossfire burst
-      else if (enemy.type === 'geo_cube_sentinel' && enemy.shootTimer >= 2.6) {
-        enemy.shootTimer = 0;
-        for (let c = 0; c < 4; c++) {
-          const crossA = enemy.rotation + (c / 4) * Math.PI * 2;
-          this.projectiles.push({
-            id: Math.random().toString(),
-            x: enemy.x,
-            y: enemy.y,
-            vx: Math.cos(crossA) * 180,
-            vy: Math.sin(crossA) * 180,
-            radius: 8,
-            damage: enemy.damage * 0.9,
-            color: '#34d399',
-            source: 'enemy',
-            duration: 2.8,
-            shape: 'cross',
-            bulletPattern: 'linear',
-          });
-        }
-      }
-      // 7. Octagon Juggernaut: Fires cluster split mortar shell
-      else if (enemy.type === 'geo_octagon' && enemy.shootTimer >= 2.8) {
-        enemy.shootTimer = 0;
-        this.projectiles.push({
-          id: Math.random().toString(),
-          x: enemy.x,
-          y: enemy.y,
-          vx: Math.cos(angle) * 160,
-          vy: Math.sin(angle) * 160,
-          radius: 11,
-          damage: enemy.damage * 1.5,
-          color: '#f97316',
-          source: 'enemy',
-          duration: 3.0,
-          shape: 'diamond',
-          bulletPattern: 'cluster_split',
-          splitTimer: 0.85,
-        });
-      }
-      // 8. Triangle: Fast razor needle
-      else if (enemy.type === 'geo_triangle' && enemy.shootTimer >= 2.6) {
-        enemy.shootTimer = 0;
-        this.projectiles.push({
-          id: Math.random().toString(),
-          x: enemy.x,
-          y: enemy.y,
-          vx: Math.cos(angle) * 280,
-          vy: Math.sin(angle) * 280,
-          radius: 5,
-          damage: enemy.damage * 0.8,
-          color: '#ef4444',
-          source: 'enemy',
-          duration: 2.0,
-          shape: 'shard',
-          bulletPattern: 'linear',
-        });
-      }
-
-      // Boss Special Super-Attacks
-      if (enemy.isBoss) {
-        if (enemy.type === 'boss_tesseract' && enemy.shootTimer >= 2.2) {
-          enemy.shootTimer = 0;
-          for (let b = 0; b < 12; b++) {
-            const bAngle = enemy.rotation + (b / 12) * Math.PI * 2;
+        // 1. Pentagon: 3-way geometric dart shotgun spread
+        if (enemy.type === 'geo_pentagon') {
+          for (let s = -1; s <= 1; s++) {
+            const shotA = inwardAngle + s * 0.22;
             this.projectiles.push({
               id: Math.random().toString(),
               x: enemy.x,
               y: enemy.y,
-              vx: Math.cos(bAngle) * 210,
-              vy: Math.sin(bAngle) * 210,
-              radius: 8,
-              damage: enemy.damage * 0.8,
-              color: '#f43f5e',
-              source: 'enemy',
-              duration: 3.5,
-              shape: 'diamond',
-              bulletPattern: 'linear',
-            });
-          }
-        } else if (enemy.type === 'boss_void_star' && enemy.shootTimer >= 1.6) {
-          enemy.shootTimer = 0;
-          for (let s = 0; s < 16; s++) {
-            const bAngle = enemy.rotation * 2 + (s / 16) * Math.PI * 2;
-            this.projectiles.push({
-              id: Math.random().toString(),
-              x: enemy.x,
-              y: enemy.y,
-              vx: Math.cos(bAngle) * 240,
-              vy: Math.sin(bAngle) * 240,
-              radius: 9,
+              vx: Math.cos(shotA) * 230,
+              vy: Math.sin(shotA) * 230,
+              radius: 6,
               damage: enemy.damage,
-              color: '#a855f7',
+              color: '#c084fc',
               source: 'enemy',
-              duration: 3.8,
-              shape: 'helix_orb',
-              bulletPattern: 'spiral',
-              curveSpeed: 0.8,
-            });
-          }
-        } else if (enemy.type === 'boss_world_eater' && enemy.shootTimer >= 1.4) {
-          enemy.shootTimer = 0;
-          for (let s = 0; s < 20; s++) {
-            const bAngle = (s / 20) * Math.PI * 2;
-            this.projectiles.push({
-              id: Math.random().toString(),
-              x: enemy.x,
-              y: enemy.y,
-              vx: Math.cos(bAngle) * 230,
-              vy: Math.sin(bAngle) * 230,
-              radius: 10,
-              damage: enemy.damage,
-              color: '#ef4444',
-              source: 'enemy',
-              duration: 4.0,
+              duration: 2.8,
               shape: 'shard',
               bulletPattern: 'linear',
             });
           }
-          this.createGeometricEnemy('geo_triangle', enemy.x + (Math.random() - 0.5) * 80, enemy.y + (Math.random() - 0.5) * 80);
+        }
+        // 2. Vortex Triangle: Shoots twin crescent shuriken darts
+        else if (enemy.type === 'geo_vortex_triangle') {
+          for (const dir of [-1, 1]) {
+            const shotA = inwardAngle + dir * 0.28;
+            this.projectiles.push({
+              id: Math.random().toString(),
+              x: enemy.x,
+              y: enemy.y,
+              vx: Math.cos(shotA) * 210,
+              vy: Math.sin(shotA) * 210,
+              radius: 8,
+              damage: enemy.damage * 0.9,
+              color: '#00f0ff',
+              source: 'enemy',
+              duration: 3.0,
+              shape: 'crescent',
+              bulletPattern: 'spiral',
+              curveSpeed: dir * 2.0,
+            });
+          }
+        }
+        // 3. Pulsar Ring: Emits expanding ring shockwave wave inward
+        else if (enemy.type === 'geo_pulsar_ring') {
+          this.projectiles.push({
+            id: Math.random().toString(),
+            x: enemy.x,
+            y: enemy.y,
+            vx: Math.cos(inwardAngle) * 95,
+            vy: Math.sin(inwardAngle) * 95,
+            radius: 14,
+            damage: enemy.damage * 1.3,
+            color: '#ec4899',
+            source: 'enemy',
+            duration: 3.2,
+            shape: 'ring',
+            bulletPattern: 'ring',
+          });
+        }
+        // 4. Prism Dart: Fires supersonic twin accelerating rail-shards inward
+        else if (enemy.type === 'geo_prism_dart') {
+          for (const off of [-7, 7]) {
+            const perpA = inwardAngle + Math.PI / 2;
+            const sx = enemy.x + Math.cos(perpA) * off;
+            const sy = enemy.y + Math.sin(perpA) * off;
+            this.projectiles.push({
+              id: Math.random().toString(),
+              x: sx,
+              y: sy,
+              vx: Math.cos(inwardAngle) * 210,
+              vy: Math.sin(inwardAngle) * 210,
+              radius: 6,
+              damage: enemy.damage * 1.1,
+              color: '#38bdf8',
+              source: 'enemy',
+              duration: 2.4,
+              shape: 'shard',
+              bulletPattern: 'linear',
+            });
+          }
+        }
+        // 5. Helix Spiral: Fires dual sine-wave undulating plasma orbs inward
+        else if (enemy.type === 'geo_helix_spiral') {
+          for (const freqMult of [-1, 1]) {
+            this.projectiles.push({
+              id: Math.random().toString(),
+              x: enemy.x,
+              y: enemy.y,
+              vx: Math.cos(inwardAngle) * 190,
+              vy: Math.sin(inwardAngle) * 190,
+              baseVx: Math.cos(inwardAngle) * 190,
+              baseVy: Math.sin(inwardAngle) * 190,
+              radius: 7,
+              damage: enemy.damage,
+              color: '#a855f7',
+              source: 'enemy',
+              duration: 3.0,
+              shape: 'helix_orb',
+              bulletPattern: 'sine',
+              amplitude: 100 * freqMult,
+              frequency: 6.0,
+            });
+          }
+        }
+        // 6. Monolith Sentinel Cube: Fires 4-point rotating crossfire burst
+        else if (enemy.type === 'geo_cube_sentinel') {
+          for (let c = 0; c < 4; c++) {
+            const crossA = inwardAngle + (c / 4) * Math.PI * 2;
+            this.projectiles.push({
+              id: Math.random().toString(),
+              x: enemy.x,
+              y: enemy.y,
+              vx: Math.cos(crossA) * 180,
+              vy: Math.sin(crossA) * 180,
+              radius: 7,
+              damage: enemy.damage * 0.9,
+              color: '#34d399',
+              source: 'enemy',
+              duration: 2.6,
+              shape: 'cross',
+              bulletPattern: 'linear',
+            });
+          }
+        }
+        // 7. Octagon Juggernaut: Fires cluster split mortar shell inward
+        else if (enemy.type === 'geo_octagon') {
+          this.projectiles.push({
+            id: Math.random().toString(),
+            x: enemy.x,
+            y: enemy.y,
+            vx: Math.cos(inwardAngle) * 170,
+            vy: Math.sin(inwardAngle) * 170,
+            radius: 11,
+            damage: enemy.damage * 1.5,
+            color: '#f97316',
+            source: 'enemy',
+            duration: 2.8,
+            shape: 'diamond',
+            bulletPattern: 'cluster_split',
+            splitTimer: 0.85,
+          });
+        }
+        // 8. Triangle: Fast razor needle inward
+        else if (enemy.type === 'geo_triangle') {
+          this.projectiles.push({
+            id: Math.random().toString(),
+            x: enemy.x,
+            y: enemy.y,
+            vx: Math.cos(inwardAngle) * 230,
+            vy: Math.sin(inwardAngle) * 230,
+            radius: 5,
+            damage: enemy.damage * 0.8,
+            color: '#ef4444',
+            source: 'enemy',
+            duration: 2.2,
+            shape: 'shard',
+            bulletPattern: 'linear',
+          });
+        }
+        // 9. Boss Synchronized Super-Attacks
+        else if (enemy.isBoss) {
+          if (enemy.type === 'boss_tesseract') {
+            for (let b = 0; b < 12; b++) {
+              const bAngle = inwardAngle + (b / 12) * Math.PI * 2;
+              this.projectiles.push({
+                id: Math.random().toString(),
+                x: enemy.x,
+                y: enemy.y,
+                vx: Math.cos(bAngle) * 210,
+                vy: Math.sin(bAngle) * 210,
+                radius: 8,
+                damage: enemy.damage * 0.8,
+                color: '#f43f5e',
+                source: 'enemy',
+                duration: 3.5,
+                shape: 'diamond',
+                bulletPattern: 'linear',
+              });
+            }
+          } else if (enemy.type === 'boss_void_star') {
+            for (let s = 0; s < 16; s++) {
+              const bAngle = inwardAngle + (s / 16) * Math.PI * 2;
+              this.projectiles.push({
+                id: Math.random().toString(),
+                x: enemy.x,
+                y: enemy.y,
+                vx: Math.cos(bAngle) * 230,
+                vy: Math.sin(bAngle) * 230,
+                radius: 9,
+                damage: enemy.damage,
+                color: '#a855f7',
+                source: 'enemy',
+                duration: 3.6,
+                shape: 'helix_orb',
+                bulletPattern: 'spiral',
+                curveSpeed: 0.8,
+              });
+            }
+          } else if (enemy.type === 'boss_world_eater') {
+            for (let s = 0; s < 20; s++) {
+              const bAngle = inwardAngle + (s / 20) * Math.PI * 2;
+              this.projectiles.push({
+                id: Math.random().toString(),
+                x: enemy.x,
+                y: enemy.y,
+                vx: Math.cos(bAngle) * 220,
+                vy: Math.sin(bAngle) * 220,
+                radius: 10,
+                damage: enemy.damage,
+                color: '#ef4444',
+                source: 'enemy',
+                duration: 3.8,
+                shape: 'shard',
+                bulletPattern: 'linear',
+              });
+            }
+          }
         }
       }
 
@@ -1874,64 +1890,74 @@ export class GameEngine {
 
       if (pattern === 'vortex') {
         // Corkscrew inward vortex: revolves around target while contracting radius
-        const curDist = Math.hypot(enemy.x - targetX, enemy.y - targetY);
-        let curAngle = Math.atan2(enemy.y - targetY, enemy.x - targetX);
-        curAngle += (1.6 * dt) * (enemy.orbitDirection || 1);
-        const newDist = Math.max(80, curDist - currentSpeed * 0.7 * dt);
-        enemy.x = targetX + Math.cos(curAngle) * newDist;
-        enemy.y = targetY + Math.sin(curAngle) * newDist;
+        if (currentSpeed > 0) {
+          const curDist = Math.hypot(enemy.x - targetX, enemy.y - targetY);
+          let curAngle = Math.atan2(enemy.y - targetY, enemy.x - targetX);
+          curAngle += (1.6 * dt) * (enemy.orbitDirection || 1);
+          const newDist = Math.max(80, curDist - currentSpeed * 0.7 * dt);
+          enemy.x = targetX + Math.cos(curAngle) * newDist;
+          enemy.y = targetY + Math.sin(curAngle) * newDist;
+        }
       } else if (pattern === 'orbit') {
         // Orbital trajectory: circles at orbitDistance
-        const desiredDist = enemy.orbitDistance || 340;
-        const curDist = Math.hypot(enemy.x - targetX, enemy.y - targetY);
-        let curAngle = Math.atan2(enemy.y - targetY, enemy.x - targetX);
-        const angSpeed = (currentSpeed / desiredDist) * (enemy.orbitDirection || 1);
-        curAngle += angSpeed * dt;
-        const radialShift = (desiredDist - curDist) * 1.5 * dt;
-        const newDist = curDist + radialShift;
-        enemy.x = targetX + Math.cos(curAngle) * newDist;
-        enemy.y = targetY + Math.sin(curAngle) * newDist;
+        if (currentSpeed > 0) {
+          const desiredDist = enemy.orbitDistance || 340;
+          const curDist = Math.hypot(enemy.x - targetX, enemy.y - targetY);
+          let curAngle = Math.atan2(enemy.y - targetY, enemy.x - targetX);
+          const angSpeed = (currentSpeed / desiredDist) * (enemy.orbitDirection || 1);
+          curAngle += angSpeed * dt;
+          const radialShift = (desiredDist - curDist) * 1.5 * dt;
+          const newDist = curDist + radialShift;
+          enemy.x = targetX + Math.cos(curAngle) * newDist;
+          enemy.y = targetY + Math.sin(curAngle) * newDist;
+        }
       } else if (pattern === 'sine') {
         // Sine wave harmonic undulation
-        const perpA = angle + Math.PI / 2;
-        const sineWave = Math.sin(enemy.moveTimer * 5.2) * 130;
-        enemy.x += (Math.cos(angle) * currentSpeed + Math.cos(perpA) * sineWave) * dt;
-        enemy.y += (Math.sin(angle) * currentSpeed + Math.sin(perpA) * sineWave) * dt;
+        if (currentSpeed > 0) {
+          const perpA = inwardAngle + Math.PI / 2;
+          const sineWave = Math.sin(enemy.moveTimer * 5.2) * 130;
+          enemy.x += (Math.cos(inwardAngle) * currentSpeed + Math.cos(perpA) * sineWave) * dt;
+          enemy.y += (Math.sin(inwardAngle) * currentSpeed + Math.sin(perpA) * sineWave) * dt;
+        }
       } else if (pattern === 'dive_dash') {
         // Dive-Dash: aim phase then supersonic dash burst
-        enemy.dashCooldown = (enemy.dashCooldown || 1.4) - dt;
-        if (enemy.dashPhase === 'aim') {
-          // Slow hovering while aiming
-          enemy.x += Math.cos(angle) * currentSpeed * 0.4 * dt;
-          enemy.y += Math.sin(angle) * currentSpeed * 0.4 * dt;
-          if (enemy.dashCooldown <= 0) {
-            enemy.dashPhase = 'charge';
-            enemy.dashCooldown = 0.65;
-            enemy.dashTargetX = Math.cos(angle) * 380;
-            enemy.dashTargetY = Math.sin(angle) * 380;
-          }
-        } else {
-          // Supersonic kinetic dash
-          enemy.x += (enemy.dashTargetX || 0) * dt;
-          enemy.y += (enemy.dashTargetY || 0) * dt;
-          if (Math.random() < 0.6) {
-            this.addParticle(enemy.x, enemy.y, -(enemy.dashTargetX || 0) * 0.1, -(enemy.dashTargetY || 0) * 0.1, '#38bdf8', 0.2, 4, 'triangle');
-          }
-          if (enemy.dashCooldown <= 0) {
-            enemy.dashPhase = 'aim';
-            enemy.dashCooldown = 1.3 + Math.random() * 0.6;
+        if (currentSpeed > 0) {
+          enemy.dashCooldown = (enemy.dashCooldown || 1.4) - dt;
+          if (enemy.dashPhase === 'aim') {
+            // Slow hovering while aiming
+            enemy.x += Math.cos(inwardAngle) * currentSpeed * 0.4 * dt;
+            enemy.y += Math.sin(inwardAngle) * currentSpeed * 0.4 * dt;
+            if (enemy.dashCooldown <= 0) {
+              enemy.dashPhase = 'charge';
+              enemy.dashCooldown = 0.65;
+              enemy.dashTargetX = Math.cos(inwardAngle) * 380;
+              enemy.dashTargetY = Math.sin(inwardAngle) * 380;
+            }
+          } else {
+            // Supersonic kinetic dash
+            enemy.x += (enemy.dashTargetX || 0) * dt;
+            enemy.y += (enemy.dashTargetY || 0) * dt;
+            if (Math.random() < 0.6) {
+              this.addParticle(enemy.x, enemy.y, -(enemy.dashTargetX || 0) * 0.1, -(enemy.dashTargetY || 0) * 0.1, '#38bdf8', 0.2, 4, 'triangle');
+            }
+            if (enemy.dashCooldown <= 0) {
+              enemy.dashPhase = 'aim';
+              enemy.dashCooldown = 1.3 + Math.random() * 0.6;
+            }
           }
         }
       } else if (pattern === 'flank') {
         // Flanking pincer trajectory: arcs around lateral sides
-        const flankOffset = Math.sin(enemy.moveTimer * 2.2) * 0.6;
-        const flankA = angle + flankOffset;
-        enemy.x += Math.cos(flankA) * currentSpeed * dt;
-        enemy.y += Math.sin(flankA) * currentSpeed * dt;
+        if (currentSpeed > 0) {
+          const flankOffset = Math.sin(enemy.moveTimer * 2.2) * 0.6;
+          const flankA = inwardAngle + flankOffset;
+          enemy.x += Math.cos(flankA) * currentSpeed * dt;
+          enemy.y += Math.sin(flankA) * currentSpeed * dt;
+        }
       } else {
         // Direct / Phalanx advance
-        enemy.x += Math.cos(angle) * currentSpeed * dt;
-        enemy.y += Math.sin(angle) * currentSpeed * dt;
+        enemy.x += Math.cos(inwardAngle) * currentSpeed * dt;
+        enemy.y += Math.sin(inwardAngle) * currentSpeed * dt;
       }
 
       // Ramming check with Snake Head
@@ -1941,8 +1967,8 @@ export class GameEngine {
         this.applyDamageToEnemy(enemy, ramDmg, 'Head Kinetic Ram');
         sound.playHitSound();
 
-        enemy.x -= Math.cos(angle) * 55;
-        enemy.y -= Math.sin(angle) * 55;
+        enemy.x -= Math.cos(inwardAngle) * 55;
+        enemy.y -= Math.sin(inwardAngle) * 55;
 
         if (!this.isDashing) {
           this.damageSnake(enemy.damage * 0.4);
@@ -3377,6 +3403,21 @@ export class GameEngine {
    */
   private drawGeometricEnemies(ctx: CanvasRenderingContext2D) {
     for (const enemy of this.enemies) {
+      // Synchronized Directional Inward Aiming Guide Line
+      if (enemy.isCharging && !enemy.isBoss) {
+        ctx.save();
+        ctx.strokeStyle = enemy.color;
+        ctx.globalAlpha = 0.2 + (enemy.chargeProgress || 0) * 0.45;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 5]);
+        const targetA = enemy.angle ?? Math.atan2(this.reactorY - enemy.y, this.reactorX - enemy.x);
+        ctx.beginPath();
+        ctx.moveTo(enemy.x, enemy.y);
+        ctx.lineTo(enemy.x + Math.cos(targetA) * 85, enemy.y + Math.sin(targetA) * 85);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       ctx.save();
       ctx.translate(enemy.x, enemy.y);
       ctx.rotate(enemy.rotation);
@@ -3418,9 +3459,25 @@ export class GameEngine {
 
   private renderRegularGeometry(ctx: CanvasRenderingContext2D, enemy: Enemy) {
     const r = enemy.radius;
+    const time = performance.now() / 1000;
+
+    // Cyber Neon Glow
+    ctx.shadowColor = enemy.color;
+    ctx.shadowBlur = enemy.isCharging ? 14 + Math.sin(time * 25) * 5 : 6;
+
+    // Synchronized Charging Focus Ring
+    if (enemy.isCharging) {
+      const chargeRatio = Math.max(0, Math.min(1, enemy.chargeProgress || 0));
+      const ringRadius = r * (1.9 - chargeRatio * 0.7);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     ctx.fillStyle = enemy.color;
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = enemy.isCharging ? '#ffffff' : enemy.color;
     ctx.lineWidth = enemy.isElite ? 3 : 2;
 
     switch (enemy.type) {

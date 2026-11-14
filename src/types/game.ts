@@ -111,6 +111,8 @@ export interface Enemy {
   dashTargetY?: number;
   formationName?: string;
   formationOffset?: { x: number; y: number };
+  isCharging?: boolean;
+  chargeProgress?: number;
 }
 
 export type BulletPattern =
